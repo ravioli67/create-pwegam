@@ -1,7 +1,8 @@
 $ErrorActionPreference = "Stop"
 
+$User = "ravioli67"
 $ModuleName = "create-pwegam"
-$RepoUrl = "https://github.com/ravioli67/create-pwegam.git"
+$RepoUrl = "https://github.com"
 
 $UserModuleBase = ($env:PSModulePath -split ';') | Where-Object { $_ -like "*$HOME*" } | Select-Object -First 1
 if (-not $UserModuleBase) {
