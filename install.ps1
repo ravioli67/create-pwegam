@@ -1,37 +1,126 @@
+
 $ErrorActionPreference = "Stop"
 
-$User = "ravioli67"
 $ModuleName = "create-pwegam"
-$RepoUrl = "https://github.com/ravioli67/create-pwegam.git"
+$RepoOwner = "ravioli67"
+$RepoName = "create-pwegam"
+$Branch = "1.0"
 
-$UserModuleBase = ($env:PSModulePath -split ';') | Where-Object { $_ -like "*$HOME*" } | Select-Object -First 1
-if (-not $UserModuleBase) {
-    $UserModuleBase = Join-Path $HOME "Documents\PowerShell\Modules"
-}
-$InstallDir = Join-Path $UserModuleBase $ModuleName
+$RepoUrl = "https://github.com/$RepoOwner/$RepoName/archive/refs/heads/$Branch.zip"
 
 Write-Host "Installing $ModuleName..." -ForegroundColor Cyan
 
-if (Test-Path $InstallDir) {
-    Remove-Item -Recurse -Force $InstallDir
-}
-New-Item -ItemType Directory -Path $InstallDir -Force | Out-Null
+# Find PowerShell module directory
+$UserModuleBase = Join-Path $HOME "Documents\PowerShell\Modules"
 
-if ($PSScriptRoot -and (Test-Path (Join-Path $PSScriptRoot "create-pwegam.psm1"))) {
-    Copy-Item -Path "$PSScriptRoot\*" -Destination $InstallDir -Recurse -Force -Exclude "install.ps1"
-} else {
-    $TempZip = Join-Path $env:TEMP "$ModuleName.zip"
-    $TempExtract = Join-Path $env:TEMP "$ModuleName-extract"
-    Invoke-WebRequest -Uri $RepoUrl -OutFile $TempZip
-    if (Test-Path $TempExtract) { Remove-Item -Recurse -Force $TempExtract }
-    Expand-Archive -Path $TempZip -DestinationPath $TempExtract -Force
-    $ExtractedRoot = Get-ChildItem $TempExtract | Select-Object -First 1
-    Copy-Item -Path "$($ExtractedRoot.FullName)\*" -Destination $InstallDir -Recurse -Force -Exclude "install.ps1"
-    Remove-Item -Force $TempZip
-    Remove-Item -Recurse -Force $TempExtract
+if (-not (Test-Path $UserModuleBase)) {
+    New-Item -ItemType Directory -Path $UserModuleBase -Force | Out-Null
 }
 
-Import-Module $ModuleName -Force
+$InstallDir = Join-Path $UserModuleBase $ModuleName
+$StageDir = Join-Path $UserModuleBase "$ModuleName-staging"
+$BackupDir = Join-Path $UserModuleBase "$ModuleName-backup"
 
-Write-Host "Installed! You can now run:" -ForegroundColor Green
-Write-Host "  create pwegam@latest my-game`n" -ForegroundColor White
+$TempRoot = Join-Path $env:TEMP "$ModuleName-install"
+$TempZip = Join-Path $TempRoot "$ModuleName.zip"
+$ExtractDir = Join-Path $TempRoot "extracted"
+
+try {
+    # Clean temporary files
+    foreach ($Path in @($TempRoot, $StageDir, $BackupDir)) {
+        if (Test-Path $Path) {
+            Remove-Item $Path -Recurse -Force
+        }
+    }
+
+    New-Item -ItemType Directory -Path $TempRoot -Force | Out-Null
+
+    Write-Host "Downloading branch: $Branch..." -ForegroundColor Cyan
+
+    # Use local files if running from the repository
+    if ($PSScriptRoot -and
+        (Test-Path (Join-Path $PSScriptRoot "$ModuleName.psm1"))) {
+
+        $SourceDir = $PSScriptRoot
+        Write-Host "Using local repository files." -ForegroundColor Gray
+    }
+    else {
+        Invoke-WebRequest -Uri $RepoUrl -OutFile $TempZip
+
+        Expand-Archive -Path $TempZip -DestinationPath $ExtractDir -Force
+
+        $ExtractedRoot = Get-ChildItem $ExtractDir -Directory |
+            Select-Object -First 1
+
+        if (-not $ExtractedRoot) {
+            throw "Could not find extracted repository."
+        }
+
+        $SourceDir = $ExtractedRoot.FullName
+    }
+
+    # Validate module
+    $ModuleFile = Join-Path $SourceDir "$ModuleName.psm1"
+
+    if (-not (Test-Path $ModuleFile)) {
+        throw "Missing required module file: $ModuleName.psm1"
+    }
+
+    Write-Host "Module validated." -ForegroundColor Green
+
+    # Stage installation
+    New-Item -ItemType Directory -Path $StageDir -Force | Out-Null
+
+    Get-ChildItem $SourceDir |
+        Where-Object { $_.Name -ne "install.ps1" } |
+        Copy-Item -Destination $StageDir -Recurse -Force
+
+    # Backup existing installation
+    if (Test-Path $InstallDir) {
+        Write-Host "Backing up previous installation..." -ForegroundColor Yellow
+        Move-Item $InstallDir $BackupDir
+    }
+
+    # Install new version
+    try {
+        Move-Item $StageDir $InstallDir
+    }
+    catch {
+        if (Test-Path $BackupDir) {
+            Move-Item $BackupDir $InstallDir
+        }
+        throw
+    }
+
+    # Import module
+    Import-Module $ModuleName -Force -ErrorAction Stop
+
+    # Remove backup after successful installation
+    if (Test-Path $BackupDir) {
+        Remove-Item $BackupDir -Recurse -Force
+    }
+
+    Write-Host ""
+    Write-Host "====================================" -ForegroundColor Green
+    Write-Host " $ModuleName installed successfully!" -ForegroundColor Green
+    Write-Host "====================================" -ForegroundColor Green
+    Write-Host ""
+    Write-Host "Run the following command:" -ForegroundColor Cyan
+    Write-Host "  create pwegam@latest my-game" -ForegroundColor White
+    Write-Host ""
+}
+catch {
+    Write-Host ""
+    Write-Host "Installation failed!" -ForegroundColor Red
+    Write-Host $_.Exception.Message -ForegroundColor Red
+    exit 1
+}
+finally {
+    if (Test-Path $TempRoot) {
+        Remove-Item $TempRoot -Recurse -Force -ErrorAction SilentlyContinue
+    }
+
+    if (Test-Path $StageDir) {
+        Remove-Item $StageDir -Recurse -Force -ErrorAction SilentlyContinue
+    }
+}
