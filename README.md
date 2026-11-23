@@ -7,7 +7,7 @@ A CLI scaffolder and hybrid **2D/3D ASCII game engine** built natively for Power
 Run this one-liner in PowerShell to install `create-pwegam` globally:
 
 ```powershell
-irm https://githubusercontent.com | iex
+irm https://raw.githubusercontent.com/ravioli67/create-pwegam/main/install.ps1 | iex
 ```
 
 ## Create a New Game
